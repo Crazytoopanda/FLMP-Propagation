@@ -112,7 +112,7 @@ def load_data(path):
         com.append(arr)
     return com
 
-def cale_onmi(real,result, location):
+def cale_onmi(real,result, location="onmi_temp.txt"):
     com1 = load_data(real)
     com2 = load_data(result)
     onmi_ = onmi(com1,com2)

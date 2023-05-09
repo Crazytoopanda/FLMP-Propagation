@@ -25,7 +25,7 @@ class COPRA :
 
     def normalize(self, graph:nx.Graph) -> nx.Graph:
         for node, data in graph.nodes(data=True):
-            tempdict = defaultdict(float)
+            tempdict = defaultdict(float )
             degree = graph.degree[node]
             for neighbor in graph.neighbors(node):
                 for neig_node, neig_data in graph.nodes[neighbor]["label"].items():

@@ -442,7 +442,7 @@ class COPRA_isolate:
         
 if __name__ == '__main__':
     app = COPRA_isolate()
-    attrs = ['on']
+    attrs = ['off']
     seed_node ='off'
     scale = 0.1
     # datatype = 'real'
@@ -453,12 +453,13 @@ if __name__ == '__main__':
     # file_names = ['0.1' ,'0.2','0.3','0.4','0.5','0.6','0.7']
     # file_names = ['1k', '2k', '3k', '4k', '5k']
     # file_names = ['1', '2', '3', '4', '5']
-    file_names = ['100']
+    file_names = ['10k']
     # , '200', '300', '400', '500']
     # file_names = ['park']
     
     # params = ['mu','n','om','on']
-    params = ['on']
+    # params = ['alone_mu0.1', 'alone_mu0.2', 'alone_mu0.3', 'alone_mu0.4', 'alone_mu0.5']
+    params = ['2222-3434', '3221-5342', '4211-3211', '5111-7222']
     # file_names = [
         # ['5']
                       # ['0.1','0.2','0.3','0.4','0.5','0.6','0.7'],
@@ -469,6 +470,7 @@ if __name__ == '__main__':
     time_list = []
     onmi_list = []
     EQ_list = []
+    times_list = []
     if datatype == 'artificial':
         for attr in attrs:
             i = 0
@@ -492,6 +494,7 @@ if __name__ == '__main__':
     else:
         for attr in attrs:
             for file_name in file_names:
+                start = time.time()
                 print('running',file_name,'...')
                 real_path = '../data/' + datatype + '/' + file_name + '.circles'
                 time_,re = app.Test(seed_node,scale,datatype, attr, None, file_name,real_path)
@@ -499,13 +502,18 @@ if __name__ == '__main__':
                 # EQ_list.append(re)
                 EQ_list.append(re[0])
                 onmi_list.append(re[1])
-        workbook = xlsxwriter.Workbook('copra_isolate_mu.xlsx')
-        worksheet = workbook.add_worksheet('data')
-        for i in range(len(file_names)):
-            worksheet.write(i, 1, file_names[i])
-            worksheet.write(i, 2, EQ_list[i])
-            worksheet.write(i, 3, onmi_list[i])
-        workbook.close()
+                end = time.time()
+                # times_list.append(end-start)
+    print(time_list)
+    print(EQ_list)
+    print(onmi_list)
+        # workbook = xlsxwriter.Workbook('copra_isolate_as.xlsx')
+        # worksheet = workbook.add_worksheet('data')
+        # for i in range(len(file_names)):
+        #     worksheet.write(i, 1, file_names[i])
+        #     worksheet.write(i, 2, EQ_list[i])
+        #     worksheet.write(i, 3, onmi_list[i])
+        # workbook.close()
             
     
     

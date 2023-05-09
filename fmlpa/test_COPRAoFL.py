@@ -78,7 +78,8 @@ class Test():
         # 执行COPRA主要逻辑代码的地方
 
         #读取属性矩阵
-        A = load_data.read_attr_from_file(feat_path)
+        # A = load_data.read_attr_from_file(feat_path)
+        A = None
         Driver = COPRA_Driver()
         # 2是什么
         communities= Driver.run(G, A, n, 2, attribute,scale,seed_node,k,mi)
@@ -95,11 +96,11 @@ class Test():
             print('eq：',EQ_)
         else:
             EQ_ = 0
-            # print('人工数据集算EQ')
-            # graph_path = '../data/' + datatype + '/' + param +  '/network' + file_name+'.txt'
-            # Graph = load_data.read_graph_from_file(graph_path, seed_node)
-            # EQ_ = EQ.cal_EQ(communities,Graph)
-            # print('eq=',EQ_)
+            print('人工数据集算EQ')
+            graph_path = '../data/' + datatype + '/' + param +  '/network' + file_name+'.txt'
+            Graph = load_data.read_graph_from_file(graph_path, seed_node)
+            EQ_ = EQ.cal_EQ(communities,Graph)
+            print('eq=',EQ_)
         print('时间：',total_time)
         
         # host = COPRA_Host()

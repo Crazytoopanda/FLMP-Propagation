@@ -1,134 +1,359 @@
+import collections
 import random
-# https://blog.csdn.net/weixin_43874070/article/details/109743309
-import community
+import time
 import networkx as nx
 import matplotlib.pyplot as plt
-import pandas as pd
+import onmi
+from collections import defaultdict
 
-import numpy as np
-from utils.tools import jaccard_sim, read_comms, calc_ONMI, calc_EQ, save_comms
-def redCommunity1(real_comms_path):
-    df3 = pd.read_csv(real_comms_path, header=None)
-
-    hasIndex = False  # 有些社区前面会有编号
-    community = []
-    for i in range(df3.shape[0]):
-        a = (df3.iat[i, 0].split(' '))
-        print(a)
-
-        if hasIndex:
-            a.pop(0)
-        a = set(map(int, a))  # 转换
-        print(type(a))
-        community.append(a)
-    return community
-def redCommunity(real_comms_path):
-
-    df3 = pd.read_csv(real_comms_path, sep=' ', header=None)
-    hasIndex = False  # 有些社区前面会有编号
-    community = []
-    for i in range(df3.shape[0]):
-        a = (df3.iat[i, 0].split('\t'))
-        print("社区长度"+str(len(a)))
-
-        if hasIndex:
-            a.pop(0)
-        a = set(map(int, a)) #转换
-        print(type(a))
-        community.append(a)
-    return community
-def dp(G,s): #差分
-
-    list=[x for x in G.nodes()]
-    # 遍历邻接矩阵
-    for i in range(len(list)):
-        for j in range(len(list)):
-            if i>j:
-                node1=list[i]
-                node2=list[j]
-                each = random.random()
-                if each < 1 - s:
-                    continue
-                else:  # 随机生成   0 1
-                    zero = random.random()
-                    if zero < 0.5:#移除或者增加
-                        if(G.has_edge(node1,node2)):
-                            G.remove_edge(node1, node2)
-                    else :
-                        G.add_edge(node1, node2)
+def load_graph(path):
+    G = collections.defaultdict(dict)
+    with open(path) as text:
+        for line in text:
+            vertices = line.strip().split()
+            v_i = int(vertices[0])
+            v_j = int(vertices[1])
+            w = 1.0  # 数据集有权重的话则读取数据集中的权重
+            G[v_i][v_j] = w
+            G[v_j][v_i] = w
     return G
-    # #对每条边,1-s 的概率保留
-    # for i in  range(A.shape[0]):
-    #     for j in range(A.shape[1]):
-    #         if i<j:
-    #             each = random.random()
-    #             if each < 1-s :
-    #                 continue
-    #             else:# 随机生成   0 1
-    #                 zero = random.random()
-    #                 if zero<0.5:
-    #                     A[i][j] = 0
-    #                     A[j][i] = 0
-    #                 else:
-    #                     A[i][j] = 1
-    #                     A[j][i] = 1
-    #  # 完成扰动的邻接矩阵 准备生成？
 
 
-def run(edge_path, real_comms_path, feat_path,s):
-    print('在run中')
-    G=nx.Graph()
+# 节点类 存储社区与节点编号信息
+class Vertex:
+    def __init__(self, vid, cid, nodes, k_in=0):
+        # 节点编号
+        self._vid = vid
+        # 社区编号
+        self._cid = cid
+        self._nodes = nodes
+        self._kin = k_in  # 结点内部的边的权重
 
-    G=nx.read_edgelist(edge_path,nodetype=int)
 
-    #，准备差分隐私扰动
-    G = dp(G,s)
+class Louvain:
+    def __init__(self, G):
+        self._G = G
+        self._m = 0  # 边数量 图会凝聚动态变化
+        self._cid_vertices = {}  # 需维护的关于社区的信息(社区编号,其中包含的结点编号的集合)
+        self._vid_vertex = {}  # 需维护的关于结点的信息(结点编号，相应的Vertex实例)
+        for vid in self._G.keys():
+            # 刚开始每个点作为一个社区
+            self._cid_vertices[vid] = {vid}
+            # 刚开始社区编号就是节点编号
+            self._vid_vertex[vid] = Vertex(vid, vid, {vid})
+            # 计算边数  每两个点维护一条边
+            self._m += sum([1 for neighbor in self._G[vid].keys()
+                           if neighbor > vid])
 
-    # 社区发现 -lovain 方法 原论文scan
-    partition = community.best_partition(G)
+    # 模块度优化阶段
+    def first_stage(self):
+        mod_inc = False  # 用于判断算法是否可终止
+        visit_sequence = self._G.keys()
+        # 随机访问
+        random.shuffle(list(visit_sequence))
+        while True:
+            can_stop = True  # 第一阶段是否可终止
+            # 遍历所有节点
+            for v_vid in visit_sequence:
+                # 获得节点的社区编号
+                v_cid = self._vid_vertex[v_vid]._cid
+                # k_v节点的权重(度数)  内部与外部边权重之和
+                k_v = sum(self._G[v_vid].values()) + \
+                    self._vid_vertex[v_vid]._kin
+                # 存储模块度增益大于0的社区编号
+                cid_Q = {}
+                # 遍历节点的邻居
+                for w_vid in self._G[v_vid].keys():
+                    # 获得该邻居的社区编号
+                    w_cid = self._vid_vertex[w_vid]._cid
+                    if w_cid in cid_Q:
+                        continue
+                    else:
+                        # tot是关联到社区C中的节点的链路上的权重的总和
+                        tot = sum(
+                            [sum(self._G[k].values()) + self._vid_vertex[k]._kin for k in self._cid_vertices[w_cid]])
+                        if w_cid == v_cid:
+                            tot -= k_v
+                        # k_v_in是从节点i连接到C中的节点的链路的总和
+                        k_v_in = sum(
+                            [v for k, v in self._G[v_vid].items() if k in self._cid_vertices[w_cid]])
+                        # 由于只需要知道delta_Q的正负，所以少乘了1/(2*self._m)
+                        delta_Q = k_v_in - k_v * tot / self._m
+                        cid_Q[w_cid] = delta_Q
 
-    print(partition)
-    count=list(set([i for i in partition.values()]))
-    print(count)
-    print(len(count))
+                # 取得最大增益的编号
+                cid, max_delta_Q = sorted(
+                    cid_Q.items(), key=lambda item: item[1], reverse=True)[0]
+                if max_delta_Q > 0.0 and cid != v_cid:
+                    # 让该节点的社区编号变为取得最大增益邻居节点的编号
+                    self._vid_vertex[v_vid]._cid = cid
+                    # 在该社区编号下添加该节点
+                    self._cid_vertices[cid].add(v_vid)
+                    # 以前的社区中去除该节点
+                    self._cid_vertices[v_cid].remove(v_vid)
+                    # 模块度还能增加 继续迭代
+                    can_stop = False
+                    mod_inc = True
+            if can_stop:
+                break
+        return mod_inc
 
-    res=[]
-    for value in count:
-        res.append(set([k for k,v in partition.items() if v == value]))
+    # 网络凝聚阶段
+    def second_stage(self):
+        cid_vertices = {}
+        vid_vertex = {}
+        # 遍历社区和社区内的节点
+        for cid, vertices in self._cid_vertices.items():
+            if len(vertices) == 0:
+                continue
+            new_vertex = Vertex(cid, cid, set())
+            # 将该社区内的所有点看做一个点
+            for vid in vertices:
+                new_vertex._nodes.update(self._vid_vertex[vid]._nodes)
+                new_vertex._kin += self._vid_vertex[vid]._kin
+                # k,v为邻居和它们之间边的权重 计算kin社区内部总权重 这里遍历vid的每一个在社区内的邻居   因为边被两点共享后面还会计算  所以权重/2
+                for k, v in self._G[vid].items():
+                    if k in vertices:
+                        new_vertex._kin += v / 2.0
+            # 新的社区与节点编号
+            cid_vertices[cid] = {cid}
+            vid_vertex[cid] = new_vertex
 
-    print('res:')
-    print(len(res))
-    print(res)
-    onmi = calc_ONMI(res, redCommunity(real_comms_path))
-    print(onmi)
-    return onmi
+        G = collections.defaultdict(dict)
+        # 遍历现在不为空的社区编号 求社区之间边的权重
+        for cid1, vertices1 in self._cid_vertices.items():
+            if len(vertices1) == 0:
+                continue
+            for cid2, vertices2 in self._cid_vertices.items():
+                # 找到cid后另一个不为空的社区
+                if cid2 <= cid1 or len(vertices2) == 0:
+                    continue
+                edge_weight = 0.0
+                # 遍历 cid1社区中的点
+                for vid in vertices1:
+                    # 遍历该点在社区2的邻居已经之间边的权重(即两个社区之间边的总权重  将多条边看做一条边)
+                    for k, v in self._G[vid].items():
+                        if k in vertices2:
+                            edge_weight += v
+                if edge_weight != 0:
+                    G[cid1][cid2] = edge_weight
+                    G[cid2][cid1] = edge_weight
+        # 更新社区和点 每个社区看做一个点
+        self._cid_vertices = cid_vertices
+        self._vid_vertex = vid_vertex
+        self._G = G
+
+    def get_communities(self):
+        communities = []
+        for vertices in self._cid_vertices.values():
+            if len(vertices) != 0:
+                c = set()
+                for vid in vertices:
+                    c.update(self._vid_vertex[vid]._nodes)
+                communities.append(list(c))
+        return communities
+
+    def execute(self):
+        iter_time = 1
+        while True:
+            iter_time += 1
+            # 反复迭代，直到网络中任何节点的移动都不能再改善总的 modularity 值为止
+            mod_inc = self.first_stage()
+            if mod_inc:
+                self.second_stage()
+            else:
+                break
+        return self.get_communities()
+
+
+# 可视化划分结果
+def showCommunity(G, partition, pos):
+    # 划分在同一个社区的用一个符号表示，不同社区之间的边用黑色粗体
+    cluster = {}
+    labels = {}
+    for index, item in enumerate(partition):
+        for nodeID in item:
+            labels[nodeID] = r'$' + str(nodeID) + '$'  # 设置可视化label
+            cluster[nodeID] = index  # 节点分区号
+
+    # 可视化节点
+    colors = ['r', 'g', 'b', 'y', 'm']
+    shapes = ['v', 'D', 'o', '^', '<']
+    for index, item in enumerate(partition):
+        nx.draw_networkx_nodes(G, pos, nodelist=item,
+                               node_color=colors[index],
+                               node_shape=shapes[index],
+                               node_size=350,
+                               alpha=1)
+
+    # 可视化边
+    edges = {len(partition): []}
+    for link in G.edges():
+        # cluster间的link
+        if cluster[link[0]] != cluster[link[1]]:
+            edges[len(partition)].append(link)
+        else:
+            # cluster内的link
+            if cluster[link[0]] not in edges:
+                edges[cluster[link[0]]] = [link]
+            else:
+                edges[cluster[link[0]]].append(link)
+
+    for index, edgelist in enumerate(edges.values()):
+        # cluster内
+        if index < len(partition):
+            nx.draw_networkx_edges(G, pos,
+                                   edgelist=edgelist,
+                                   width=1, alpha=0.8, edge_color=colors[index])
+        else:
+            # cluster间
+            nx.draw_networkx_edges(G, pos,
+                                   edgelist=edgelist,
+                                   width=3, alpha=0.8, edge_color=colors[index])
+
+    # 可视化label
+    nx.draw_networkx_labels(G, pos, labels, font_size=12)
+
+    plt.axis('off')
+    plt.show()
+
+
+def cal_Q(partition, G):  # 计算Q
+    # 如果为真，则返回3元组（u、v、ddict）中的边缘属性dict。如果为false，则返回2元组（u，v）
+    m = len(G.edges(None, False))
+    # print(G.edges(None,False))
+    # print("=======6666666")
+    a = []
+    e = []
+    for community in partition:  # 把每一个联通子图拿出来
+        t = 0.0
+        for node in community:  # 找出联通子图的每一个顶点
+            # G.neighbors(node)找node节点的邻接节点
+            t += len([x for x in G.neighbors(node)])
+        a.append(t / (2 * m))
+    #             self.zidian[t/(2*m)]=community
+    for community in partition:
+        t = 0.0
+        for i in range(len(community)):
+            for j in range(len(community)):
+                if (G.has_edge(community[i], community[j])):
+                    t += 1.0
+        e.append(t / (2 * m))
+
+    q = 0.0
+    for ei, ai in zip(e, a):
+        q += (ei - ai ** 2)
+    return q
+
+def cal_EQ(cover, G):
+    m = len(G.edges(None, False))  # 如果为真，则返回3元组（u、v、ddict）中的边缘属性dict。如果为false，则返回2元组（u，v）
+    # 存储每个节点所在的社区
+    vertex_community = collections.defaultdict(lambda: set())
+    # i为社区编号(第几个社区) c为该社区中拥有的节点
+    for i, c in enumerate(cover):
+        # v为社区中的某一个节点
+        for v in c:
+            # 根据节点v统计他所在的社区i有哪些
+            vertex_community[v].add(i)
+    total = 0.0
+    for c in cover:
+        for i in c:
+            o_i = len(vertex_community[i])
+            k_i = len(G[i])
+            for j in c:
+                o_j = len(vertex_community[j])
+                if j not in G:
+                    print(j)
+                k_j = len(G[j])
+                if i > j:
+                    continue
+                t = 0.0
+                if j in G[i]:
+                    t += 1.0 / (o_i * o_j)
+                t -= k_i * k_j / (2 * m * o_i * o_j)
+                if i == j:
+                    total += t
+                else:
+                    total += 2 * t
+    return round(total / (2 * m), 4)
+
+
+class Graph:
+    graph = nx.DiGraph()
+
+    def __init__(self):
+        self.graph = nx.DiGraph()
+
+    def createGraph(self, filename):
+        file = open(filename, 'r')
+
+        for line in file.readlines():
+            nodes = line.split()
+            edge = (int(nodes[0]), int(nodes[1]))
+            self.graph.add_edge(*edge)
+
+        return self.graph
+
+def load_graph1(path):
+    G = nx.Graph()
+    with open(path, 'r') as text:
+        for line in text:
+            vertices = line.strip().split('\t')
+            # print(vertices[0])
+            source = int(vertices[0])
+            target = int(vertices[1])
+            G.add_edge(source, target)
+    return G
+
+def print_communities_to_file(communities, output_path):
+    output_file = open(output_path, 'w')
+    for cmu in communities:
+        for member in cmu:
+            member = str(member)
+            output_file.write(member + " ")
+        output_file.write("\n")
+    output_file.close()
+    return
+
+
 
 if __name__ == '__main__':
+    #mu数据集
+    edge_path = '../data/artificial/as/network10k.txt'
+    real_path = '../data/artificial/as/community10k.txt'
+    write_path = '../data/artificial/as/network10k_Louvain.txt'
+    # #real数据集
+    # edge_path = 'data/real/7682452.edges'
+    # real_path = 'data/real/7682452.circles'
+    # write_path = 'data/real/real_7682452_Louvain.txt'
+    # G = load_graph('data/club.txt')
+    # G = load_graph('data/OpenFlights.txt')
+    G = load_graph(edge_path)
+    obj = Graph()
+    # G1 = obj.createGraph("Data//OpenFlights.txt")
+    # G1 = obj.createGraph("data/network0.1.txt")
+    # G1 = nx.read_edgelist('data/network0.1.txt')
+    G1 = load_graph1(edge_path)
+    # G1 = nx.karate_club_graph()
+    # pos = nx.spring_layout(G1)
 
-    hasIndex = False
-    isReal = True
-    file_type = 'real'
-    dp_s =0.02  #(0,1)
-    file_name_list = [ 'facebook414']
-    nparts=1
-    for file_name in file_name_list:
-        if isReal:
-            edge_path = '../datasets/attribute/' + file_type + '/' + str(
-                nparts) + '/' + file_name + '.txt'
-            feat_path = '../datasets/attribute/' + file_type + '/' + str(
-                nparts) + '/' + file_name + '_feat.txt'
+    start_time = time.time()
+    algorithm = Louvain(G)
+    communities = algorithm.execute()
+    end_time = time.time()
+    # 按照社区大小从大到小排序输出
+    communities = sorted(communities, key=lambda b: -len(b))  # 按社区大小排序
+    count = 0
+    for communitie in communities:
+        count += 1
+        print("社区", count, " ", communitie)
 
-            real_comms_path = '../datasets/attribute/' + file_type + '/' + str(
-                nparts) + '/real_' + file_name + '.txt'
-        else:
-            edge_path = '../datasets/attribute/' + file_type + '/' + str(
-                nparts) + '/' + 'network' + file_name + '.txt'
-            feat_path = '../datasets/attribute/' + file_type + '/' + str(
-                nparts) + '/' + 'network' + file_name + '_feat.txt'
-            real_comms_path = '../datasets/attribute/' + file_type + '/' + str(
-                nparts) + '/community' + file_name + '.txt'
 
-        onmi= run(edge_path, real_comms_path, feat_path,dp_s)
-
-        print("信息：file_name: {0} , nparts: {1} , onmi: {2} ".format(
-            file_name, nparts, onmi))
+    print_communities_to_file(communities,write_path)
+    print(onmi.cale_onmi(real_path,write_path))
+    print("communities是",communities)
+    print(cal_EQ(communities,G1))
+    # print(cal_Q(communities, G1))
+    print(f'算法执行时间{end_time - start_time}')
+    # 可视化结果
+    # showCommunity(G1, communities, pos)
