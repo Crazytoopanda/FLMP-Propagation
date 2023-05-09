@@ -1,4 +1,3 @@
 # fmlpa-source-code
 
-## fmlpa-lfa -- Comparable Algorithm
-
+Supporting Files Applied to "Privacy-preserving Multi-label Propagation Based on Federated Learning" Thesis
